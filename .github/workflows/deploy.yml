@@ -1,0 +1,68 @@
+name: Build data snapshot and deploy to GitHub Pages
+
+# Three ways this runs:
+#   - on push to main: deploy whatever's in the repo (code changes)
+#   - on a daily schedule: refresh data/data.json from FRED and redeploy
+#   - workflow_dispatch: a manual "Run workflow" button in the Actions tab,
+#     for forcing a refresh/redeploy on demand
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "17 5 * * *" # once daily; FRED's own series update at most once a day anyway
+  workflow_dispatch: {}
+
+# Only one deploy in flight at a time; a newer run cancels an in-progress
+# older one rather than queuing behind it.
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      # FRED_API_KEY lives only in this runner's environment for this one
+      # step -- it's never written to data/data.json or any other file
+      # that ends up in the deployed artifact below, so it's never
+      # exposed to site visitors. Set it under this repo's
+      # Settings -> Secrets and variables -> Actions -> New repository secret.
+      - name: Fetch latest data from FRED
+        env:
+          FRED_API_KEY: ${{ secrets.FRED_API_KEY }}
+        run: npm run fetch-data
+
+      # A basic correctness safety net: don't deploy a build whose pure
+      # calculation logic is broken. This does NOT re-verify the live
+      # fetch above (that's covered by fetch-data.mjs's own retry/error
+      # handling) -- it's the same offline, deterministic suite you can
+      # run locally with `npm test`.
+      - name: Run tests
+        run: npm test
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: "."
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
