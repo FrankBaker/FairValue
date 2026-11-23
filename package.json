@@ -1,0 +1,11 @@
+{
+  "name": "fair-value-web",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Static, GitHub-Pages-hosted PPP fair-value tool for any two currencies -- a client-side port of the Fair_Value_V2 Shiny app.",
+  "scripts": {
+    "test": "node --test tests/fairvalue.test.mjs tests/fetch-data.test.mjs",
+    "fetch-data": "node scripts/fetch-data.mjs"
+  }
+}
