@@ -315,3 +315,149 @@ export function fairValueAnalysis(merged, startDate, endDate = null) {
 
   return { data, pppChangePct, anomalyBand: [lowerQ, upperQ], startDate };
 }
+
+// ---------------------------------------------------------------------
+// UIP (uncovered interest rate parity) overlay
+//
+// Everything below is additive -- none of the functions above are
+// modified, so every existing test and its exact fixture numbers keep
+// passing unchanged. UIP reuses the same "anchor at every historical
+// date, compound forward, fit a trend" idea as the PPP calculation
+// above, just swapping the inflation differential for an interest-rate
+// differential: the theory being that the market's own interest-rate
+// gap between two currencies is priced as an implied expectation of
+// future depreciation, independent of (and a useful complement to) the
+// inflation-driven PPP estimate. See PROPOSAL.md.
+// ---------------------------------------------------------------------
+
+/** Build the merged {dates, rate, domesticRate, foreignRate} series for
+ * a currency pair's UIP calculation -- the structural twin of
+ * buildPairSeries() above, except it reads each currency's `.interest`
+ * series (an annual short-term interest rate, in percent) instead of
+ * `.infl`. Unlike `.infl` (required for every currency) or `.perUsd`
+ * (implicitly 1 for USD), `.interest` is genuinely optional -- FRED has
+ * no clean short-term rate for Singapore, for instance -- so this throws
+ * a clear, currency-naming error when either leg lacks it, which callers
+ * use to detect "UIP isn't available for this pair" before ever
+ * reaching the chart. */
+export function buildInterestRateSeries(baseCcy, quoteCcy, data) {
+  const base = data.currencies[baseCcy];
+  const quote = data.currencies[quoteCcy];
+  if (!base) throw new Error(`Unknown currency: ${baseCcy}`);
+  if (!quote) throw new Error(`Unknown currency: ${quoteCcy}`);
+  if (!base.interest) throw new Error(`Interest-rate data is not available for ${baseCcy}, so UIP can't be computed for this pair.`);
+  if (!quote.interest) throw new Error(`Interest-rate data is not available for ${quoteCcy}, so UIP can't be computed for this pair.`);
+
+  const basePerUsd = baseCcy === "USD" ? null : base.perUsd;
+  const quotePerUsd = quoteCcy === "USD" ? null : quote.perUsd;
+
+  const axisSeries = [base.interest, quote.interest];
+  if (basePerUsd) axisSeries.push(basePerUsd);
+  if (quotePerUsd) axisSeries.push(quotePerUsd);
+  const axis = unionDates(axisSeries);
+
+  const baseVals = basePerUsd
+    ? forwardFillOnAxis(basePerUsd.dates, basePerUsd.values, axis)
+    : axis.map(() => 1);
+  const quoteVals = quotePerUsd
+    ? forwardFillOnAxis(quotePerUsd.dates, quotePerUsd.values, axis)
+    : axis.map(() => 1);
+  const domVals = forwardFillOnAxis(base.interest.dates, base.interest.values, axis);
+  const forVals = forwardFillOnAxis(quote.interest.dates, quote.interest.values, axis);
+
+  const dates = [];
+  const rate = [];
+  const domesticRate = [];
+  const foreignRate = [];
+  for (let i = 0; i < axis.length; i++) {
+    if (baseVals[i] == null || quoteVals[i] == null || domVals[i] == null || forVals[i] == null) {
+      continue;
+    }
+    dates.push(axis[i]);
+    rate.push(baseVals[i] / quoteVals[i]);
+    domesticRate.push(domVals[i]);
+    foreignRate.push(forVals[i]);
+  }
+  return { dates, rate, domesticRate, foreignRate };
+}
+
+/** The generic form of impliedFairValue() above: for every date t,
+ * compound `rate[t]` forward by the realised differential between
+ * `domesticPct`/`foreignPct` from t through to the most recent date.
+ * impliedFairValue() itself is untouched and keeps calling its own
+ * inline copy of this logic (zero risk of disturbing its existing,
+ * fixture-verified behaviour) -- this twin exists so UIP can reuse the
+ * identical math against interest rates instead of inflation without
+ * duplicating the differencing/compounding logic a second time. */
+export function impliedValueFromRates(dates, rate, domesticPct, foreignPct) {
+  const diff = differentialInflation(dates, domesticPct, foreignPct);
+  const n = diff.length;
+
+  const remaining = new Array(n);
+  let acc = 0;
+  for (let i = n - 1; i >= 0; i--) {
+    acc += diff[i];
+    remaining[i] = acc;
+  }
+
+  const impliedValue = new Array(n);
+  for (let i = 0; i < n; i++) impliedValue[i] = rate[i] * Math.exp(remaining[i]);
+
+  return { dates, rate, impliedValue };
+}
+
+/** UIP's counterpart to fairValueAnalysis(): windows `merged` (from
+ * buildInterestRateSeries) to [startDate, today], same validation and
+ * error messages as fairValueAnalysis so the UI can treat both the same
+ * way, then fits a log-linear trend through the UIP-implied ensemble --
+ * deliberately simpler than fairValueAnalysis (no uncertainty band, no
+ * real-rate band): just a single trend line, comparable on the same
+ * chart to the PPP fair-value trend. `startDate`/`endDate` are ISO
+ * "YYYY-MM-DD" strings, same convention as fairValueAnalysis. */
+export function uipTrendAnalysis(merged, startDate, endDate = null) {
+  const datesAll = merged.dates;
+  if (datesAll.length === 0) {
+    throw new Error("No interest-rate data is available for this currency pair.");
+  }
+  if (startDate < datesAll[0] || startDate > datesAll[datesAll.length - 1]) {
+    throw new Error(
+      `Start date is outside the available data range (${datesAll[0]} to ${datesAll[datesAll.length - 1]}).`
+    );
+  }
+
+  const startIdx = datesAll.findIndex((d) => d >= startDate);
+  if (startIdx < 0) {
+    throw new Error(
+      `Start date is outside the available data range (${datesAll[0]} to ${datesAll[datesAll.length - 1]}).`
+    );
+  }
+
+  const windowed = {
+    dates: merged.dates.slice(startIdx),
+    rate: merged.rate.slice(startIdx),
+    domesticRate: merged.domesticRate.slice(startIdx),
+    foreignRate: merged.foreignRate.slice(startIdx),
+  };
+  if (windowed.dates.length < 30) {
+    throw new Error("Fewer than 30 observations after the selected start date -- pick an earlier start date.");
+  }
+
+  const uip = impliedValueFromRates(windowed.dates, windowed.rate, windowed.domesticRate, windowed.foreignRate);
+  const uipTrend = fitTrend(uip.dates, uip.impliedValue);
+
+  let data = { date: uip.dates, uipRate: uip.rate, uipTrend };
+
+  if (endDate) {
+    const keepIdx = [];
+    for (let i = 0; i < data.date.length; i++) {
+      if (data.date[i] <= endDate) keepIdx.push(i);
+    }
+    const trimmed = {};
+    for (const key of Object.keys(data)) {
+      trimmed[key] = keepIdx.map((i) => data[key][i]);
+    }
+    data = trimmed;
+  }
+
+  return { data, startDate };
+}

@@ -37,6 +37,32 @@ Everything else -- the PPP calculation, the two-currency-pair selection,
 the real-rate (REER-style) band toggle, the fair-value trend and
 uncertainty band -- works the same way.
 
+## Three additional overlays
+
+All three are optional, off (or on) by default as noted, and toggled
+with their own checkbox in the sidebar:
+
+- **UIP (interest-rate-implied) trend** -- on by default: off. Reuses the
+  exact same anchor-at-every-date-and-fit-a-trend method as the PPP fair
+  value line, except it compounds forward using each currency's
+  short-term interest-rate differential instead of its inflation
+  differential -- the market's own implied expectation of future
+  depreciation, a genuinely different and complementary signal to PPP.
+  Unavailable for any pair involving SGD: FRED has no clean short-term
+  interbank/policy rate series for Singapore, so the checkbox disables
+  itself automatically for those pairs.
+- **Global commodity-price overlay** -- on by default: off. A single
+  global commodity price index (not currency-specific) plotted on the
+  deviation chart's own secondary axis, as a rough visual check on how
+  much of any "overvaluation"/"undervaluation" reading is really just
+  tracking commodity-price cycles. A country-specific terms-of-trade
+  series would be more precise for a commodity exporter like South
+  Africa, but doesn't generalize across all seven currencies, which is
+  why this app uses one common index instead.
+- **Fair-value uncertainty band** -- on by default: on (this is the same
+  10th-90th percentile ensemble band the app has always shown; this
+  release just made it possible to hide it).
+
 ## Project layout
 
 ```
@@ -50,7 +76,12 @@ Fair_Value_Web/
   data/
     data.json                the FRED data snapshot (generated; see below
                              -- NOT committed with real data until you run
-                             the fetch script or the GitHub Action does)
+                             the fetch script or the GitHub Action does).
+                             Per currency: name, infl (inflation), perUsd
+                             (absent for USD), and interest (absent for
+                             SGD -- see "Three additional overlays"
+                             above). Also a top-level commodity field
+                             (absent if that one fetch failed this run).
   scripts/
     fetch-data.mjs            downloads FRED data, writes data/data.json
   tests/

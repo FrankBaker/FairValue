@@ -63,6 +63,47 @@
         a fitted trend. See &ldquo;How this works&rdquo; below.
       </p>
 
+      <div class="field field-checkbox">
+        <label>
+          <input type="checkbox" id="showUncertaintyBand" checked />
+          Show fair-value uncertainty band
+        </label>
+      </div>
+      <p class="help">
+        The shaded 10th&ndash;90th percentile spread around the fair-value
+        trend, already part of the calculation &mdash; this just shows or
+        hides it.
+      </p>
+
+      <div class="field field-checkbox">
+        <label>
+          <input type="checkbox" id="showUip" />
+          Show UIP (interest-rate-implied) trend
+          <span id="uipUnavailableNote" class="unavailable-note" hidden>(not available for this pair)</span>
+        </label>
+      </div>
+      <p class="help" id="uipHelp">
+        Uncovered interest rate parity: a second, independent fair-value
+        trend implied by the interest-rate differential between the two
+        currencies, rather than their inflation differential. Unavailable
+        for any pair involving SGD &mdash; FRED has no comparable
+        short-term rate series for Singapore.
+      </p>
+
+      <div class="field field-checkbox">
+        <label>
+          <input type="checkbox" id="showCommodity" />
+          Show global commodity-price overlay
+        </label>
+      </div>
+      <p class="help" id="commodityHelp">
+        A single global commodity price index plotted alongside the
+        deviation chart below, as a rough visual check on how much of any
+        reading is tracking commodity-price cycles rather than a genuine
+        PPP misalignment &mdash; most informative for commodity-sensitive
+        currencies like ZAR, less so between two reserve currencies.
+      </p>
+
       <p class="help" id="dataFreshness"></p>
 
       <details class="accordion">
@@ -105,6 +146,31 @@
           <code>generatedAt</code>) rather than live &mdash; the
           &ldquo;latest close&rdquo; marker on the charts is the most recent
           day in that snapshot, not an intraday quote.
+        </p>
+        <p>
+          <strong>UIP (interest-rate-implied) trend:</strong> uses the exact
+          same anchor-at-every-date-and-fit-a-trend method as the PPP fair
+          value line above, except it compounds forward using each
+          currency&rsquo;s short-term interest rate differential instead of
+          its inflation differential. Interest-rate differentials are, in
+          theory, the market&rsquo;s own implied expectation of future
+          depreciation &mdash; a genuinely different, complementary signal
+          to inflation-driven PPP, though UIP itself is known to fail
+          systematically in the data (the &ldquo;forward premium
+          puzzle&rdquo;), so it&rsquo;s shown as a second line to compare
+          against, not a replacement. Unavailable for pairs involving SGD,
+          since FRED has no comparable short-term rate series for
+          Singapore.
+        </p>
+        <p>
+          <strong>Commodity-price overlay:</strong> a single global
+          commodity price index, shown on the deviation chart&rsquo;s own
+          secondary axis. It&rsquo;s not specific to any one currency pair
+          &mdash; a country-specific terms-of-trade series would be more
+          precise for a commodity exporter, but doesn&rsquo;t generalize
+          across all seven currencies here &mdash; so treat it as a rough
+          visual sanity check (particularly for commodity-sensitive
+          currencies) rather than a precise explanatory variable.
         </p>
         <p>
           <em>This is one model among several plausible ones &mdash; see

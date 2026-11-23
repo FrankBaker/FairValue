@@ -24,6 +24,9 @@ import {
   median,
   realRateBand,
   fairValueAnalysis,
+  buildInterestRateSeries,
+  impliedValueFromRates,
+  uipTrendAnalysis,
 } from "../js/lib/fairvalue.js";
 
 function closeTo(actual, expected, tolerance = 1e-9, msg = "") {
@@ -258,6 +261,122 @@ test("fairValueAnalysis's endDate trims display data without changing the trend 
   for (let i = 0; i < 10; i++) {
     closeTo(trimmed.data.fairValueTrend[i], full.data.fairValueTrend[i], 1e-9, `at index ${i}`);
   }
+});
+
+// -----------------------------------------------------------------------
+// UIP (uncovered interest rate parity) overlay
+// -----------------------------------------------------------------------
+
+test("impliedValueFromRates matches impliedFairValue's own hand-computed fixture (identical math, renamed field)", () => {
+  // Same fixture as "impliedFairValue matches a hand-computed
+  // constant-differential fixture" above -- this isn't a new formula,
+  // just the same compounding logic applied to rates instead of
+  // inflation, so it must reproduce the exact same numbers.
+  const dates = dateSeq("2020-01-01", 40);
+  const rate = dates.map(() => 10);
+  const domesticRate = dates.map(() => 6);
+  const foreignRate = dates.map(() => 2);
+
+  const result = impliedValueFromRates(dates, rate, domesticRate, foreignRate);
+
+  closeTo(result.impliedValue[0], 10.042801811493112, 1e-9);
+  closeTo(result.impliedValue[10], 10.03290823855275, 1e-9);
+  closeTo(result.impliedValue[39], 10.001095200283658, 1e-9);
+});
+
+test("buildInterestRateSeries throws a currency-naming error when a leg lacks .interest (e.g. SGD)", () => {
+  const data = {
+    currencies: {
+      ZAR: {
+        name: "South Africa",
+        interest: { dates: ["2020-01-01"], values: [7] },
+        perUsd: { dates: ["2020-01-01"], values: [15] },
+      },
+      SGD: {
+        name: "Singapore",
+        // no .interest -- mirrors the real data gap this app actually has
+        perUsd: { dates: ["2020-01-01"], values: [1.35] },
+      },
+    },
+  };
+
+  assert.throws(() => buildInterestRateSeries("ZAR", "SGD", data), /Interest-rate data is not available for SGD/);
+  assert.throws(() => buildInterestRateSeries("SGD", "ZAR", data), /Interest-rate data is not available for SGD/);
+});
+
+test("buildInterestRateSeries merges rate + interest-differential legs like buildPairSeries does for inflation", () => {
+  const data = {
+    currencies: {
+      FOO: {
+        name: "Foo",
+        interest: { dates: ["2020-01-01"], values: [8] },
+        perUsd: { dates: ["2020-01-02", "2020-01-06", "2020-01-08"], values: [10, 12, 14] },
+      },
+      BAR: {
+        name: "Bar",
+        interest: { dates: ["2020-01-01"], values: [3] },
+        perUsd: { dates: ["2020-01-02", "2020-01-06", "2020-01-08"], values: [1, 1, 1] },
+      },
+    },
+  };
+
+  const merged = buildInterestRateSeries("FOO", "BAR", data);
+  assert.deepEqual(merged.dates, ["2020-01-02", "2020-01-06", "2020-01-08"]);
+  assert.deepEqual(merged.rate, [10, 12, 14]);
+  assert.ok(merged.domesticRate.every((v) => v === 8));
+  assert.ok(merged.foreignRate.every((v) => v === 3));
+});
+
+test("buildInterestRateSeries treats USD as an implicit numeraire, same as buildPairSeries", () => {
+  const data = {
+    currencies: {
+      FOO: {
+        name: "Foo",
+        interest: { dates: ["2020-01-01"], values: [8] },
+        perUsd: { dates: ["2020-01-01", "2020-01-02"], values: [18.5, 18.6] },
+      },
+      USD: {
+        name: "United States",
+        interest: { dates: ["2020-01-01"], values: [5] },
+      },
+    },
+  };
+
+  const merged = buildInterestRateSeries("FOO", "USD", data);
+  assert.deepEqual(merged.rate, [18.5, 18.6]);
+});
+
+test("uipTrendAnalysis fits a log-linear trend through the UIP-implied ensemble, same validation as fairValueAnalysis", () => {
+  const dates = dateSeq("2020-01-01", 40);
+  const merged = {
+    dates,
+    rate: dates.map(() => 10),
+    domesticRate: dates.map(() => 6),
+    foreignRate: dates.map(() => 2),
+  };
+
+  const result = uipTrendAnalysis(merged, "2020-01-01");
+  assert.equal(result.data.date.length, 40);
+  assert.equal(result.data.uipTrend.length, 40);
+  // Same constant-differential fixture as impliedFairValue's test, so the
+  // ensemble (pre-trend) values must match exactly.
+  closeTo(result.data.uipRate[0], 10, 1e-9);
+
+  assert.throws(() => uipTrendAnalysis(merged, "2010-01-01"), /outside the available data range/);
+  assert.throws(() => uipTrendAnalysis(merged, "2020-02-05"), /Fewer than 30 observations/);
+});
+
+test("uipTrendAnalysis's endDate trims display data, same convention as fairValueAnalysis", () => {
+  const dates = dateSeq("2020-01-01", 40);
+  const merged = {
+    dates,
+    rate: dates.map(() => 10),
+    domesticRate: dates.map(() => 6),
+    foreignRate: dates.map(() => 2),
+  };
+
+  const trimmed = uipTrendAnalysis(merged, "2020-01-01", "2020-01-10");
+  assert.equal(trimmed.data.date.length, 10);
 });
 
 test("unionDates returns a sorted, deduplicated union", () => {

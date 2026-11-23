@@ -12,7 +12,7 @@
 
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { fetchFredSeries } from "../scripts/fetch-data.mjs";
+import { fetchFredSeries, CURRENCY_SOURCES } from "../scripts/fetch-data.mjs";
 
 let originalFetch;
 before(() => {
@@ -75,4 +75,17 @@ test("fetchFredSeries rejects an all-missing series with a clear error rather th
   global.fetch = async () => fredResponse([{ date: "2020-01-01", value: "." }]);
 
   await assert.rejects(() => fetchFredSeries("FAKE", "key"), /FAKE/);
+});
+
+test("CURRENCY_SOURCES has an interest-rate ticker for every currency except SGD (the one confirmed FRED data gap)", () => {
+  for (const [code, info] of Object.entries(CURRENCY_SOURCES)) {
+    if (code === "SGD") {
+      assert.equal(info.intTicker, null, "SGD should have no intTicker -- FRED has no clean short-term rate for it");
+    } else {
+      assert.ok(
+        typeof info.intTicker === "string" && info.intTicker.length > 0,
+        `${code} should have a non-empty intTicker`
+      );
+    }
+  }
 });

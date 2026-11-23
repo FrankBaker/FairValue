@@ -124,6 +124,17 @@ body {
   font-size: 0.9rem;
 }
 
+.field-checkbox input:disabled + * ,
+.field-checkbox input:disabled {
+  opacity: 0.6;
+}
+
+.unavailable-note {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-style: italic;
+}
+
 .help {
   font-size: 0.78rem;
   color: var(--muted);

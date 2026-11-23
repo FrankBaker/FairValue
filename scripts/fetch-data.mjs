@@ -40,15 +40,35 @@ const OUTPUT_PATH = join(__dirname, "..", "data", "data.json");
 //
 // USD itself has no FRED ticker: it's the implicit numeraire, always
 // exactly 1 USD per USD.
+// intTicker: a short-term (3-month interbank) interest rate series, used
+// for the UIP (uncovered interest rate parity) overlay -- the market's
+// own interest-rate-implied expectation of currency depreciation. These
+// are OECD Main Economic Indicators series as carried by FRED; they
+// exist for six of our seven currencies. Singapore is the one gap: FRED
+// has no equivalent clean short-term interbank/policy rate series for
+// SGD, so intTicker is left null there and the UIP overlay is simply
+// unavailable for any pair involving SGD (the UI disables that checkbox
+// when either selected currency lacks interest-rate data).
 export const CURRENCY_SOURCES = {
-  USD: { fredTicker: null, invert: false, inflTicker: "FPCPITOTLZGUSA", name: "United States" },
-  ZAR: { fredTicker: "DEXSFUS", invert: false, inflTicker: "FPCPITOTLZGZAF", name: "South Africa" },
-  CHF: { fredTicker: "DEXSZUS", invert: false, inflTicker: "CPALTT01CHA657N", name: "Switzerland" },
-  SGD: { fredTicker: "DEXSIUS", invert: false, inflTicker: "FPCPITOTLZGSGP", name: "Singapore" },
-  GBP: { fredTicker: "DEXUSUK", invert: true, inflTicker: "FPCPITOTLZGGBR", name: "United Kingdom" },
-  CNY: { fredTicker: "DEXCHUS", invert: false, inflTicker: "FPCPITOTLZGCHN", name: "China" },
-  EUR: { fredTicker: "DEXUSEU", invert: true, inflTicker: "FPCPITOTLZGEMU", name: "the Euro area" },
+  USD: { fredTicker: null, invert: false, inflTicker: "FPCPITOTLZGUSA", intTicker: "IR3TIB01USM156N", name: "United States" },
+  ZAR: { fredTicker: "DEXSFUS", invert: false, inflTicker: "FPCPITOTLZGZAF", intTicker: "IR3TIB01ZAM156N", name: "South Africa" },
+  CHF: { fredTicker: "DEXSZUS", invert: false, inflTicker: "CPALTT01CHA657N", intTicker: "IR3TIB01CHM156N", name: "Switzerland" },
+  SGD: { fredTicker: "DEXSIUS", invert: false, inflTicker: "FPCPITOTLZGSGP", intTicker: null, name: "Singapore" },
+  GBP: { fredTicker: "DEXUSUK", invert: true, inflTicker: "FPCPITOTLZGGBR", intTicker: "IR3TIB01GBM156N", name: "United Kingdom" },
+  CNY: { fredTicker: "DEXCHUS", invert: false, inflTicker: "FPCPITOTLZGCHN", intTicker: "IR3TIB01CNM156N", name: "China" },
+  EUR: { fredTicker: "DEXUSEU", invert: true, inflTicker: "FPCPITOTLZGEMU", intTicker: "IR3TIB01EZM156N", name: "the Euro area" },
 };
+
+// A single global commodity price index, used for the (currency-agnostic)
+// terms-of-trade/commodity-price overlay. A country-specific
+// terms-of-trade series would be more precise for a commodity exporter
+// like South Africa, but doesn't generalize across all seven currencies
+// -- this is the same reason the original CTOT overlay was dropped when
+// this app was generalized from a ZAR-only tool. One global series,
+// fetched once (not per currency), is a rougher but honestly-generalizable
+// stand-in: useful context for commodity-sensitive pairs, less so for
+// pairs between two reserve currencies.
+const COMMODITY_TICKER = "PALLFNFINDEXM";
 
 const FRED_API_BASE = "https://api.stlouisfed.org/fred/series/observations";
 const FETCH_ATTEMPTS = 3;
@@ -135,6 +155,19 @@ async function main() {
       }
     }
 
+    // Interest-rate data is optional, unlike inflation/FX above: a
+    // missing or failed intTicker just means the UIP overlay is
+    // unavailable for this currency, not that the currency itself is
+    // unusable -- so a failure here is logged but never skips the
+    // currency entirely.
+    if (info.intTicker) {
+      try {
+        entry.interest = await fetchFredSeries(info.intTicker, apiKey);
+      } catch (err) {
+        failures.push(`${code} interest rate (${info.intTicker}): ${err.message}`);
+      }
+    }
+
     currencies[code] = entry;
   }
 
@@ -150,9 +183,20 @@ async function main() {
     }
   }
 
+  let commodity;
+  try {
+    commodity = await fetchFredSeries(COMMODITY_TICKER, apiKey);
+  } catch (err) {
+    // Non-fatal: the commodity overlay just becomes unavailable this run
+    // (the UI's checkbox for it is hidden/disabled when the field is
+    // absent) -- it shouldn't block deploying everything else.
+    console.error(`Commodity index (${COMMODITY_TICKER}) failed to download: ${err.message}`);
+  }
+
   const output = {
     generatedAt: new Date().toISOString(),
     currencies,
+    ...(commodity ? { commodity } : {}),
   };
 
   await mkdir(dirname(OUTPUT_PATH), { recursive: true });

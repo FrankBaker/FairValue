@@ -9,13 +9,20 @@
 // DOM at all.
 // ---------------------------------------------------------------------
 
-import { buildPairSeries, fairValueAnalysis } from "./lib/fairvalue.js";
+import {
+  buildPairSeries,
+  fairValueAnalysis,
+  buildInterestRateSeries,
+  uipTrendAnalysis,
+} from "./lib/fairvalue.js";
 
 const COLOURS = {
   actual: "#d62728",
   fairValue: "#1f77b4",
   latest: "#2ca02c",
   real: "#9467bd",
+  uip: "#ff7f0e",
+  commodity: "#8c564b",
 };
 
 let DATA = null;
@@ -27,6 +34,10 @@ const el = {
   windowFrom: document.getElementById("windowFrom"),
   windowTo: document.getElementById("windowTo"),
   showRealRateBand: document.getElementById("showRealRateBand"),
+  showUncertaintyBand: document.getElementById("showUncertaintyBand"),
+  showUip: document.getElementById("showUip"),
+  uipUnavailableNote: document.getElementById("uipUnavailableNote"),
+  showCommodity: document.getElementById("showCommodity"),
   dataFreshness: document.getElementById("dataFreshness"),
   errorBanner: document.getElementById("errorBanner"),
   fairValueSubtitle: document.getElementById("fairValueSubtitle"),
@@ -54,6 +65,25 @@ function populateCurrencyChoices() {
 
   el.baseCurrency.value = codes.includes("ZAR") ? "ZAR" : codes[0];
   el.quoteCurrency.value = codes.includes("USD") ? "USD" : codes[Math.min(1, codes.length - 1)];
+}
+
+/** True when both currencies in the pair have interest-rate data, i.e.
+ * the UIP overlay can actually be computed -- false for any pair
+ * involving SGD, since FRED has no comparable short-term rate series for
+ * Singapore (see scripts/fetch-data.mjs). */
+function uipAvailableForPair(baseCcy, quoteCcy) {
+  return Boolean(DATA.currencies[baseCcy]?.interest) && Boolean(DATA.currencies[quoteCcy]?.interest);
+}
+
+/** Keeps the UIP checkbox in sync with whether the *currently selected*
+ * pair actually supports it -- disables it and shows the "(not available
+ * for this pair)" note rather than letting the user tick a box that can
+ * never do anything for this pair. */
+function updateUipAvailability() {
+  const available = uipAvailableForPair(el.baseCurrency.value, el.quoteCurrency.value);
+  el.showUip.disabled = !available;
+  el.uipUnavailableNote.hidden = available;
+  if (!available) el.showUip.checked = false;
 }
 
 function setDefaultWindow() {
@@ -94,28 +124,35 @@ function windowData(data, fromIso, toIso) {
   return out;
 }
 
-function renderFairValuePlot(dat, pairLabel, showRealRateBand) {
-  const traces = [
-    {
-      name: "band",
-      x: dat.date,
-      y: dat.fairValueUpper,
-      mode: "lines",
-      line: { width: 0 },
-      hoverinfo: "skip",
-      showlegend: false,
-    },
-    {
-      name: "band",
-      x: dat.date,
-      y: dat.fairValueLower,
-      mode: "lines",
-      line: { width: 0 },
-      fill: "tonexty",
-      fillcolor: "rgba(31,119,180,0.12)",
-      hoverinfo: "skip",
-      showlegend: false,
-    },
+function renderFairValuePlot(dat, pairLabel, showRealRateBand, showUncertaintyBand, uipWindowed) {
+  const traces = [];
+
+  if (showUncertaintyBand) {
+    traces.push(
+      {
+        name: "band",
+        x: dat.date,
+        y: dat.fairValueUpper,
+        mode: "lines",
+        line: { width: 0 },
+        hoverinfo: "skip",
+        showlegend: false,
+      },
+      {
+        name: "band",
+        x: dat.date,
+        y: dat.fairValueLower,
+        mode: "lines",
+        line: { width: 0 },
+        fill: "tonexty",
+        fillcolor: "rgba(31,119,180,0.12)",
+        hoverinfo: "skip",
+        showlegend: false,
+      }
+    );
+  }
+
+  traces.push(
     {
       name: "Actual",
       x: dat.date,
@@ -152,8 +189,8 @@ function renderFairValuePlot(dat, pairLabel, showRealRateBand) {
       y: [dat.rate[dat.rate.length - 1]],
       mode: "markers",
       marker: { color: COLOURS.latest, size: 9 },
-    },
-  ];
+    }
+  );
 
   if (showRealRateBand) {
     traces.push(
@@ -187,6 +224,16 @@ function renderFairValuePlot(dat, pairLabel, showRealRateBand) {
     );
   }
 
+  if (uipWindowed) {
+    traces.push({
+      name: "UIP (interest-rate) trend",
+      x: uipWindowed.date,
+      y: uipWindowed.uipTrend,
+      mode: "lines",
+      line: { color: COLOURS.uip, width: 3, dash: "dashdot" },
+    });
+  }
+
   const layout = {
     title: { text: pairLabel },
     xaxis: { title: "" },
@@ -199,7 +246,7 @@ function renderFairValuePlot(dat, pairLabel, showRealRateBand) {
   Plotly.newPlot("fairValuePlot", traces, layout, { responsive: true, displaylogo: false });
 }
 
-function renderAnomalyPlot(dat, pairLabel) {
+function renderAnomalyPlot(dat, pairLabel, commodityWindowed) {
   const lastIdx = dat.date.length - 1;
   const traces = [
     {
@@ -229,15 +276,33 @@ function renderAnomalyPlot(dat, pairLabel) {
   const layout = {
     xaxis: { title: "" },
     yaxis: { title: `${pairLabel} deviation` },
-    showlegend: false,
-    margin: { t: 20, b: 40, l: 60, r: 30 },
+    showlegend: Boolean(commodityWindowed),
+    margin: { t: 20, b: 40, l: 60, r: commodityWindowed ? 60 : 30 },
     font: { size: 13 },
   };
+
+  if (commodityWindowed) {
+    traces.push({
+      name: "Global commodity price index",
+      x: commodityWindowed.dates,
+      y: commodityWindowed.values,
+      mode: "lines",
+      line: { color: COLOURS.commodity, width: 1.5, dash: "dot" },
+      yaxis: "y2",
+    });
+    layout.yaxis2 = {
+      title: "Commodity index",
+      overlaying: "y",
+      side: "right",
+      showgrid: false,
+    };
+    layout.legend = { orientation: "h", x: 0.5, xanchor: "center", y: -0.2 };
+  }
 
   Plotly.newPlot("anomalyPlot", traces, layout, { responsive: true, displaylogo: false });
 }
 
-function renderSummary(dat, pairLabel, baseCode, pppChangePct, showRealRateBand) {
+function renderSummary(dat, pairLabel, baseCode, pppChangePct, showRealRateBand, uipWindowed) {
   const lastIdx = dat.date.length - 1;
   const live = dat.rate[lastIdx];
   const trend = dat.fairValueTrend[lastIdx];
@@ -269,7 +334,36 @@ function renderSummary(dat, pairLabel, baseCode, pppChangePct, showRealRateBand)
     `;
   }
 
+  if (uipWindowed && uipWindowed.uipTrend.length > 0) {
+    const uipLastIdx = uipWindowed.uipTrend.length - 1;
+    const uipTrendLive = uipWindowed.uipTrend[uipLastIdx];
+    const uipDeviationPct = 100 * (live / uipTrendLive - 1);
+    const uipDirection = uipDeviationPct > 0 ? "weaker" : "stronger";
+    html += `
+      <p><strong>UIP (interest-rate-implied) check:</strong> the interest-rate-differential trend puts
+         today's implied rate at ${fmt(uipTrendLive)} &mdash; ${baseCode} looks ${uipDirection} than
+         this independent, inflation-free signal suggests, a useful cross-check against the PPP estimate
+         above.</p>
+    `;
+  }
+
   el.summary.innerHTML = html;
+}
+
+/** Trim a plain {dates, values} series (e.g. the commodity index) to
+ * [fromIso, toIso] for display -- the same display-only windowing idea
+ * as windowData() above, just for a series that isn't shaped like
+ * fairValueAnalysis()'s output. */
+function windowSimpleSeries(series, fromIso, toIso) {
+  const dates = [];
+  const values = [];
+  for (let i = 0; i < series.dates.length; i++) {
+    if (series.dates[i] >= fromIso && series.dates[i] <= toIso) {
+      dates.push(series.dates[i]);
+      values.push(series.values[i]);
+    }
+  }
+  return { dates, values };
 }
 
 function recompute() {
@@ -278,6 +372,8 @@ function recompute() {
 
   const baseCcy = el.baseCurrency.value;
   const quoteCcy = el.quoteCurrency.value;
+
+  updateUipAvailability();
 
   if (baseCcy === quoteCcy) {
     showError("Pick two different currencies to compare.");
@@ -291,6 +387,7 @@ function recompute() {
 
   const pairLabel = `${baseCcy}/${quoteCcy}`;
   const showRealRateBand = el.showRealRateBand.checked;
+  const showUncertaintyBand = el.showUncertaintyBand.checked;
 
   try {
     const merged = buildPairSeries(baseCcy, quoteCcy, DATA);
@@ -308,9 +405,32 @@ function recompute() {
     el.fairValueSubtitle.textContent = subtitle;
     el.anomalySubtitle.textContent = `${pairLabel} deviation from its own fair-value trend`;
 
-    renderFairValuePlot(windowed, pairLabel, showRealRateBand);
-    renderAnomalyPlot(windowed, pairLabel);
-    renderSummary(windowed, pairLabel, baseCcy, result.pppChangePct, showRealRateBand);
+    // UIP is computed and rendered independently of the PPP calculation
+    // above: a UIP-specific failure (e.g. too few interest-rate
+    // observations after this particular start date) should never block
+    // showing the PPP chart, so its own try/catch just silently drops
+    // the UIP trace rather than raising the shared error banner.
+    let uipWindowed = null;
+    if (el.showUip.checked && !el.showUip.disabled) {
+      try {
+        const uipMerged = buildInterestRateSeries(baseCcy, quoteCcy, DATA);
+        const uipResult = uipTrendAnalysis(uipMerged, el.startDate.value);
+        const w = windowData(uipResult.data, el.windowFrom.value, el.windowTo.value);
+        if (w.date.length > 0) uipWindowed = w;
+      } catch {
+        uipWindowed = null;
+      }
+    }
+
+    let commodityWindowed = null;
+    if (el.showCommodity.checked && DATA.commodity) {
+      const w = windowSimpleSeries(DATA.commodity, el.windowFrom.value, el.windowTo.value);
+      if (w.dates.length > 0) commodityWindowed = w;
+    }
+
+    renderFairValuePlot(windowed, pairLabel, showRealRateBand, showUncertaintyBand, uipWindowed);
+    renderAnomalyPlot(windowed, pairLabel, commodityWindowed);
+    renderSummary(windowed, pairLabel, baseCcy, result.pppChangePct, showRealRateBand, uipWindowed);
   } catch (err) {
     showError(err.message || String(err));
     Plotly.purge("fairValuePlot");
@@ -327,6 +447,9 @@ function attachListeners() {
     el.windowFrom,
     el.windowTo,
     el.showRealRateBand,
+    el.showUncertaintyBand,
+    el.showUip,
+    el.showCommodity,
   ]) {
     input.addEventListener("change", recompute);
   }
@@ -347,6 +470,12 @@ async function init() {
 
   populateCurrencyChoices();
   setDefaultWindow();
+  updateUipAvailability();
+
+  if (!DATA.commodity) {
+    el.showCommodity.disabled = true;
+    el.showCommodity.title = "Unavailable: this run's commodity-index fetch failed or hasn't run yet.";
+  }
 
   const generated = new Date(DATA.generatedAt);
   el.dataFreshness.textContent = `Data snapshot generated ${generated.toLocaleString()}.`;
