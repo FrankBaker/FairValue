@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Currency Fair Value (PPP)</title>
+<meta name="description" content="A purchasing-power-parity fair-value estimate between any two of several major currencies, computed entirely in your browser from a periodically refreshed FRED data snapshot." />
+<link rel="stylesheet" href="css/styles.css" />
+<script src="https://cdnjs.cloudflare.com/ajax/libs/plotly.js/2.30.0/plotly.min.js"></script>
+</head>
+<body>
+  <div class="layout">
+    <aside class="sidebar">
+      <h1>Currency Fair Value <span class="subtitle-inline">(PPP)</span></h1>
+
+      <div class="field">
+        <label for="baseCurrency">Currency 1 (priced)</label>
+        <select id="baseCurrency"></select>
+      </div>
+
+      <div class="field">
+        <label for="quoteCurrency">Currency 2 (per 1 unit of)</label>
+        <select id="quoteCurrency"></select>
+      </div>
+
+      <p class="help">
+        &ldquo;Currency 1 / Currency 2&rdquo; reads like a ratio &mdash; e.g.
+        choosing ZAR then EUR gives Rand per Euro. Pick any two different
+        currencies to compare.
+      </p>
+
+      <div class="field">
+        <label for="startDate">PPP start date</label>
+        <input type="date" id="startDate" value="1995-01-01" min="1960-01-01" />
+      </div>
+      <p class="help">
+        Fair value is estimated using every day from the start date to today
+        as a possible PPP anchor, then smoothed into a single trend (see
+        &ldquo;How this works&rdquo; below). An earlier start date feeds more
+        history into that trend.
+      </p>
+
+      <div class="field field-row">
+        <div>
+          <label for="windowFrom">Chart window from</label>
+          <input type="date" id="windowFrom" />
+        </div>
+        <div>
+          <label for="windowTo">to</label>
+          <input type="date" id="windowTo" />
+        </div>
+      </div>
+
+      <div class="field field-checkbox">
+        <label>
+          <input type="checkbox" id="showRealRateBand" />
+          Show real-rate (REER-style) band
+        </label>
+      </div>
+      <p class="help">
+        A complementary, trend-free view: the inflation-adjusted rate
+        compared to its own historical range for this window, rather than to
+        a fitted trend. See &ldquo;How this works&rdquo; below.
+      </p>
+
+      <p class="help" id="dataFreshness"></p>
+
+      <details class="accordion">
+        <summary>How this works</summary>
+        <p>
+          &ldquo;Fair value&rdquo; here means the exchange rate implied by
+          relative purchasing-power parity (PPP): if Currency 1&rsquo;s
+          country sees hotter inflation than Currency 2&rsquo;s, Currency 1
+          needs to weaken by roughly that differential to keep buying power
+          even.
+        </p>
+        <p>
+          Dashed lines are smoothed trends, not the raw data &mdash;
+          they&rsquo;re what make the estimate robust to the choice of start
+          date. The lower chart shows how far the raw estimate strays from
+          that trend at each point in time, which is a rough
+          over/under-valuation signal.
+        </p>
+        <p>
+          The shaded band around the fair-value trend shows the 10th-90th
+          percentile spread of what you&rsquo;d have gotten anchoring on
+          different historical dates &mdash; a rough, honest sense of how
+          much this estimate depends on which date you&rsquo;d trust, not a
+          precise number.
+        </p>
+        <p>
+          <strong>Real-rate band:</strong> switching this on adds a
+          different, complementary view: the actual rate with the
+          accumulated inflation differential stripped back out (so it would
+          be flat if PPP held exactly), compared to the 10th-90th percentile
+          range it&rsquo;s occupied over the selected window. It makes no
+          assumption about a trend &mdash; just whether today looks unusual
+          next to this currency pair&rsquo;s own recent history.
+        </p>
+        <p>
+          <strong>Data:</strong> every currency is tracked against the US
+          Dollar; a cross rate between any two of them (like EUR/GBP) is
+          built by dividing one by the other. Data is refreshed on a
+          schedule (see <code>data/data.json</code>&rsquo;s
+          <code>generatedAt</code>) rather than live &mdash; the
+          &ldquo;latest close&rdquo; marker on the charts is the most recent
+          day in that snapshot, not an intraday quote.
+        </p>
+        <p>
+          <em>This is one model among several plausible ones &mdash; see
+          PROPOSAL.md in the project this was ported from for a fuller
+          discussion of its assumptions and limitations.</em>
+        </p>
+      </details>
+    </aside>
+
+    <main class="content">
+      <div id="errorBanner" class="error-banner" hidden></div>
+
+      <section class="card">
+        <h2>Actual vs. PPP fair value</h2>
+        <p class="chart-subtitle" id="fairValueSubtitle"></p>
+        <div id="fairValuePlot" class="plot"></div>
+      </section>
+
+      <section class="card">
+        <h2>Deviation from the fair-value trend</h2>
+        <p class="chart-subtitle" id="anomalySubtitle"></p>
+        <div id="anomalyPlot" class="plot"></div>
+      </section>
+
+      <section class="card">
+        <h2>Summary</h2>
+        <div id="summary"></div>
+      </section>
+    </main>
+  </div>
+
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>
