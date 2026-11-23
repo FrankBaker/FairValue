@@ -1,0 +1,12 @@
+# Generated data snapshot -- fetched fresh by scripts/fetch-data.mjs
+# (locally) or by the GitHub Actions workflow (on every scheduled run and
+# deploy). Not committed, so it never goes stale in git history and a
+# locally-fetched copy (which used your own machine's clock/API call)
+# never gets mixed up with what's actually deployed.
+data/data.json
+
+# OS cruft
+.DS_Store
+
+# In case dependencies are ever added
+node_modules/
